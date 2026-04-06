@@ -1,25 +1,28 @@
-name: Build and Push OmniReaperPro
 
-on:
-  push:
-    branches: [ main ]
+FROM ubuntu:22.04
 
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+ENV DEBIAN_FRONTEND=noninteractive ENV TZ=UTC
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+RUN apt-get update && apt-get install -y 
+python3.10 python3-pip python3-dev 
+openjdk-21-jre-headless 
+curl git build-essential pkg-config 
+libssl-dev libffi-dev wget unzip 
+&& rm -rf /var/lib/apt/lists/*
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          tags: lyesbadeche/omni-reaper-pro:latest
+RUN curl –proto ‘=https’ –tlsv1.2 -sSf https://sh.rustup.rs | sh -s – -y ENV PATH=”/root/.cargo/bin:${PATH}”
+
+RUN curl -L https://foundry.paradigm.xyz | bash ENV PATH=”/root/.foundry/bin:${PATH}” RUN /root/.foundry/bin/foundryup
+
+RUN pip3 install –no-cache-dir solc-select 
+&& solc-select install 0.8.20 
+&& solc-select install 0.8.19 
+&& solc-select use 0.8.20
+
+RUN pip3 install –no-cache-dir slither-analyzer mythril certora-cli halmos
+
+WORKDIR /app COPY requirements.txt . RUN pip3 install –no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000 CMD [“python3”, “main.py”]
