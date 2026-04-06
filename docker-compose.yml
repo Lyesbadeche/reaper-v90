@@ -7,10 +7,18 @@ services:
       - "5000:5000"
     depends_on:
       - db
+      - redis
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=YOURPASS
       - POSTGRES_DB=contracts
+      - POSTGRES_HOST=db
+      - REDIS_HOST=redis
+      - ETH_RPC=${ETH_RPC}
+      - BSC_RPC=${BSC_RPC}
+      - POLYGON_RPC=${POLYGON_RPC}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
 
   db:
     image: postgres:15
@@ -22,6 +30,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
 
 volumes:
   pgdata:
