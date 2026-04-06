@@ -1,33 +1,42 @@
-FROM python:3.10-slim
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
 
 RUN apt-get update && apt-get install -y \
-    build-essential \
+    python3.10 \
+    python3-pip \
+    python3-dev \
+    openjdk-17-jre-headless \
     curl \
     git \
-    openjdk-17-jre-headless \
+    build-essential \
     pkg-config \
     libssl-dev \
+    libffi-dev \
     wget \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-RUN curl -L https://foundry.paradigm.xyz | bash \
-    && /root/.foundry/bin/foundryup
+RUN curl -L https://foundry.paradigm.xyz | bash
 ENV PATH="/root/.foundry/bin:${PATH}"
+RUN /root/.foundry/bin/foundryup
 
-RUN pip install --no-cache-dir solc-select \
+RUN pip3 install --no-cache-dir solc-select \
     && solc-select install all \
     && solc-select use 0.8.20
 
-RUN pip install --no-cache-dir slither-analyzer mythril certora-cli halmos
+RUN pip3 install --no-cache-dir slither-analyzer mythril certora-cli halmos
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY . .
 
 EXPOSE 5000
-CMD ["python", "main.py"]
+
+CMD ["python3", "main.py"]
