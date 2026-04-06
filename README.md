@@ -1,18 +1,18 @@
-# OmniReaperPro
+# 🛡️ OmniReaperPro: Advanced Smart Contract Security Scanner
 
-## الفكرة
-مشروع ماسح أمني للعقود الذكية باستخدام أدوات مثل:
-- Slither
-- Mythril
-- Echidna
-- Halmos
+## 🚀 Overview
+An enterprise-grade security scanner combining **AI (Transformers)** with **Formal Verification tools** (Slither, Echidna, Certora) to detect vulnerabilities in real-time.
 
-مع قاعدة بيانات PostgreSQL وواجهة API مبنية بـ Flask، بالإضافة إلى إمكانية ربط التنبيهات عبر Telegram.
+## 🛠️ Tech Stack
+- **AI Engine:** DistilBERT for bytecode classification.
+- **Scanners:** Slither, Mythril, Halmos, Forge.
+- **Backend:** Python (Asyncio), Ray (Parallel processing).
+- **Database:** PostgreSQL & Redis.
 
----
-
-## طريقة التشغيل
-1. تأكد أن لديك **Docker** و **Docker Compose** مثبتين.
-2. داخل مجلد المشروع شغّل:
+## 📦 How to Run
+1. Clone the repo.
+2. Setup environment variables (RPCs, Telegram Token).
+3. Run using Docker:
    ```bash
    docker-compose up --build
+
