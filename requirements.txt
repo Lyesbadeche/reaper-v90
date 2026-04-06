@@ -1,4 +1,13 @@
 flask
-psycopg2-binary
 requests
-python-dotenv
+web3
+psycopg2-binary
+redis
+ray
+transformers
+torch
+scikit-learn
+slither-analyzer
+mythril
+certora-cli
+solc-select
