@@ -1,94 +1,147 @@
-import requests
-import time
 import os
+import asyncio
+import requests
+import subprocess
+import sqlite3
+import psycopg2
+import redis
+from flask import Flask, jsonify, render_template
+from web3 import Web3
+from transformers import pipeline
+import ray
 
-class OmniReaperWhaleHunter:
+ray.init(ignore_reinit_error=True)
+
+app = Flask(__name__)
+
+class AdvancedAIAnalyzer:
     def __init__(self):
-        # Fetching keys directly from Railway Environment Variables
-        self.keys = {
-            "ETH": os.getenv("ETHERSCAN_KEY"),
-            "BSC": os.getenv("BSCSCAN_KEY"),
-            "POLYGON": os.getenv("POLYGONSCAN_KEY")
+        self.nlp = pipeline("text-classification", model="distilbert-base-uncased")
+
+    def analyze(self, bytecode):
+        result = self.nlp(bytecode[:200])
+        label = result[0]['label']
+        score = result[0]['score']
+        return label, score
+
+class OmniReaperProScanner:
+    def __init__(self):
+        self.networks = {
+            "ETH": Web3(Web3.HTTPProvider(os.getenv("ETH_RPC"))),
+            "BSC": Web3(Web3.HTTPProvider(os.getenv("BSC_RPC"))),
+            "POLYGON": Web3(Web3.HTTPProvider(os.getenv("POLYGON_RPC")))
         }
         self.tg_token = os.getenv("TELEGRAM_TOKEN")
         self.tg_id = os.getenv("TELEGRAM_CHAT_ID")
-        
-        self.networks = {
-            "ETH": "https://api.etherscan.io/api",
-            "BSC": "https://api.bscscan.com/api",
-            "POLYGON": "https://api.polygonscan.com/api"
-        }
-        self.scanned_addresses = set()
-        self.total_scanned = 0
+        self.discord_webhook = os.getenv("DISCORD_WEBHOOK")
+        self.slack_webhook = os.getenv("SLACK_WEBHOOK")
+        self.email_api = os.getenv("EMAIL_API")
 
-    def get_contract_data(self, chain, address):
-        url = self.networks[chain]
-        key = self.keys.get(chain)
-        if not key: return None, 0
-        
+        self.conn = sqlite3.connect("scanner_results.db")
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("""CREATE TABLE IF NOT EXISTS results (
+                                chain TEXT,
+                                address TEXT,
+                                balance REAL,
+                                ai_prediction TEXT,
+                                report TEXT,
+                                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                              )""")
+
         try:
-            # 1. Get Bytecode
-            code_res = requests.get(url, params={"module": "proxy", "action": "eth_getCode", "address": address, "apikey": key}, timeout=10).json()
-            bytecode = code_res.get('result', '0x')
-            if len(bytecode) < 100: return None, 0
-            
-            # 2. Get Real Balance
-            bal_res = requests.get(url, params={"module": "account", "action": "balance", "address": address, "apikey": key}, timeout=10).json()
-            balance_wei = int(bal_res.get('result', '0'))
-            usd_value = (balance_wei / 1e18) * (3500 if chain == "ETH" else 600 if chain == "BSC" else 1)
-            
-            return bytecode, usd_value
-        except: return None, 0
+            self.pg_conn = psycopg2.connect(
+                dbname=os.getenv("POSTGRES_DB"),
+                user=os.getenv("POSTGRES_USER"),
+                password=os.getenv("POSTGRES_PASSWORD"),
+                host=os.getenv("POSTGRES_HOST")
+            )
+            self.pg_cursor = self.pg_conn.cursor()
+        except Exception as e:
+            print("PostgreSQL not connected:", e)
 
+        self.cache = redis.Redis(host=os.getenv("REDIS_HOST"), port=6379)
+        self.ai = AdvancedAIAnalyzer()
+
+    def run_tool(self, tool, args, timeout=30):
+        try:
+            result = subprocess.run([tool] + args, capture_output=True, text=True, timeout=timeout)
+            return result.stdout[:1000]
+        except Exception as e:
+            return f"{tool} error: {e}"
+
+    @ray.remote
     def audit_logic(self, chain, address, bytecode, usd):
-        # CRITICAL VULNERABILITY SIGNATURES
-        signatures = {
-            "0xa9059cbb": "Transfer Logic Found",
-            "0x23b872dd": "TransferFrom Detected",
-            "0xde5f8566": "DelegateCall (High Risk)"
-        }
-        
-        findings = [name for sig, name in signatures.items() if sig in bytecode]
-        
-        # FILTER: Only alert if Real Liquidity > $10 and not fake address
-        if findings and usd > 10 and not address.lower().endswith("eeeeeeeeee"):
-            msg = f"🚨 [WHALE FOUND]\nNet: {chain}\nAddr: `{address}`\nBounty: ${usd:,.2f}\nLogic: {', '.join(findings)}"
-            requests.post(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", 
-                          json={"chat_id": self.tg_id, "text": msg, "parse_mode": "Markdown"})
-            return True
-        return False
+        label, score = self.ai.analyze(bytecode)
+        report = ""
+        report += self.run_tool("slither", ["Contract.sol"], 20)
+        report += self.run_tool("echidna-test", ["Contract.sol"], 30)
+        report += self.run_tool("halmos", ["Contract.sol"], 30)
+        report += self.run_tool("forge", ["test", "--contracts", "Contract.sol"], 25)
+        report += self.run_tool("certora", ["run", "Contract.sol"], 40)
+        report += self.run_tool("securify", ["Contract.sol"], 25)
 
-    def start_engine(self):
-        print("--- 📡 V91.0 OMNI-REAPER | LIVE SCANNER ACTIVE ---")
+        msg = f"🚨 Contract Audit\nNetwork: {chain}\nAddress: {address}\nBalance: ${usd:.2f}\nAI: {label} ({score:.2f})\nReport:\n{report}"
+
+        requests.post(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", json={"chat_id": self.tg_id, "text": msg})
+        if self.discord_webhook:
+            requests.post(self.discord_webhook, json={"content": msg})
+        if self.slack_webhook:
+            requests.post(self.slack_webhook, json={"text": msg})
+
+        self.cursor.execute("INSERT INTO results VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)", (chain, address, usd, label, report))
+        self.conn.commit()
+
+        try:
+            self.pg_cursor.execute("INSERT INTO results (chain,address,balance,ai_prediction,report) VALUES (%s,%s,%s,%s,%s)",
+                                   (chain, address, usd, label, report))
+            self.pg_conn.commit()
+        except:
+            pass
+
+        return True
+
+    async def start_engine(self):
         while True:
-            for chain, api_url in self.networks.items():
-                key = self.keys.get(chain)
-                if not key: continue
-                
-                try:
-                    # Scan the latest real block transactions
-                    res = requests.get(api_url, params={"module": "proxy", "action": "eth_getBlockByNumber", "tag": "latest", "boolean": "true", "apikey": key}, timeout=15).json()
-                    transactions = res.get('result', {}).get('transactions', [])
-                    
-                    for tx in transactions[:10]:
-                        target = tx.get('to')
-                        if not target or target in self.scanned_addresses: continue
-                        
-                        self.scanned_addresses.add(target)
-                        self.total_scanned += 1
-                        
-                        bytecode, usd = self.get_contract_data(chain, target)
-                        if bytecode:
-                            self.audit_logic(chain, target, bytecode, usd)
-                            
-                except Exception as e:
-                    print(f"Error on {chain}: {e}")
-                
-                time.sleep(5) # Rate limiting protection
-            
-            if len(self.scanned_addresses) > 1000: self.scanned_addresses.clear()
-            print(f"[STATUS] Total Real Audits: {self.total_scanned}")
+            tasks = [self.scan_network(chain, w3) for chain, w3 in self.networks.items()]
+            await asyncio.gather(*tasks)
+            await asyncio.sleep(5)
+
+    async def scan_network(self, chain, w3):
+        try:
+            block = w3.eth.get_block("latest", full_transactions=True)
+            for tx in block.transactions[:50]:
+                if tx.to:
+                    code = w3.eth.get_code(tx.to)
+                    balance = w3.eth.get_balance(tx.to) / 1e18
+                    usd = balance * 3500
+                    await self.audit_logic.remote(self, chain, tx.to, code.hex(), usd)
+        except Exception as e:
+            print(f"Error on {chain}: {e}")
+
+@app.route("/results")
+def get_results():
+    conn = sqlite3.connect("scanner_results.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM results ORDER BY balance DESC LIMIT 20")
+    rows = cursor.fetchall()
+    return jsonify(rows)
+
+@app.route("/dashboard")
+def dashboard():
+    conn = sqlite3.connect("scanner_results.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM results ORDER BY balance DESC LIMIT 20")
+    rows = cursor.fetchall()
+    html = "<h1>Scanner Results</h1><table border='1'>"
+    for row in rows:
+        html += "<tr>" + "".join(f"<td>{col}</td>" for col in row) + "</tr>"
+    html += "</table>"
+    return html
 
 if __name__ == "__main__":
-    reaper = OmniReaperWhaleHunter()
-    reaper.start_engine()
+    scanner = OmniReaperProScanner()
+    try:
+        asyncio.run(scanner.start_engine())
+    except KeyboardInterrupt:
+        print("Scanner stopped.")
+    app.run(host="0.0.0.0", port=5000)
