@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+
 
 ENV DEBIAN_FRONTEND=noninteractive ENV TZ=UTC
 
@@ -24,4 +24,4 @@ WORKDIR /app COPY requirements.txt . RUN pip3 install –no-cache-dir -r require
 
 COPY . .
 
-EXPOSE 5000 CMD [“python3”, “main.py”]
+EXPOSE 5000 CMD [“python3
