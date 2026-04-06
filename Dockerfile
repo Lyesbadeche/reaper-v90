@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     python3.10 \
     python3-pip \
     python3-dev \
-    openjdk-17-jre-headless \
+    openjdk-21-jdk-headless \
     curl \
     git \
     build-essential \
@@ -40,3 +40,5 @@ COPY . .
 EXPOSE 5000
 
 CMD ["python3", "main.py"]
+
+
