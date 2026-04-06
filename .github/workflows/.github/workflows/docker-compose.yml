@@ -1,0 +1,74 @@
+name: Docker Compose CI
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Build images with docker-compose
+        run: docker-compose -f docker-compose.yml build
+
+      - name: Push images to Docker Hub
+        run: docker-compose -f docker-compose.yml push
+
+      - name: Run services with docker-compose
+        run: docker-compose -f docker-compose.yml up -d
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for services..."
+          sleep 20
+
+      - name: Test scanner service
+        run: |
+          set -e
+          if ! curl -f http://localhost:5000; then
+            echo "Scanner service failed, printing logs..."
+            docker-compose -f docker-compose.yml logs scanner > scanner.log
+            exit 1
+          fi
+
+      - name: Test database service
+        run: |
+          set -e
+          if ! docker exec $(docker-compose ps -q db) pg_isready -U postgres; then
+            echo "Database service failed, printing logs..."
+            docker-compose -f docker-compose.yml logs db > db.log
+            exit 1
+          fi
+
+      - name: Test redis service
+        run: |
+          set -e
+          if ! docker exec $(docker-compose ps -q redis) redis-cli ping | grep -q PONG; then
+            echo "Redis service failed, printing logs..."
+            docker-compose -f docker-compose.yml logs redis > redis.log
+            exit 1
+          fi
+
+      - name: List running containers
+        run: docker ps
+
+      - name: Upload logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: service-logs
+          path: |
+            scanner.log
+            db.log
+            redis.log
+
+      - name: Shut down services
+        if: always()
+        run: docker-compose -f docker-compose.yml down
